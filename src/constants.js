@@ -1,0 +1,46 @@
+const VIEW_TYPE_DEV_FILE =
+    "dev-file-editor-view";
+
+const DEFAULT_EXTENSIONS = [
+    "env",
+    "example",
+    "txt",
+    "text",
+    "log",
+    "yml",
+    "yaml",
+    "json",
+    "jsonc",
+    "conf",
+    "config",
+    "cfg",
+    "ini",
+    "toml",
+    "properties",
+    "sh",
+    "bash",
+    "zsh",
+    "js",
+    "jsx",
+    "ts",
+    "tsx",
+    "py",
+    "php",
+    "rb",
+    "go",
+    "rs",
+    "java",
+    "c",
+    "cpp",
+    "h",
+    "hpp",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "xml",
+    "csv",
+    "sql"
+];
+
+module.exports = { VIEW_TYPE_DEV_FILE, DEFAULT_EXTENSIONS };

@@ -1,0 +1,9 @@
+{
+  "id": "red-file-editor",
+  "name": "Red File Editor",
+  "version": "1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Create and edit non-Markdown text files directly inside Obsidian, including hidden dotfiles.",
+  "author": "Red_Blum",
+  "isDesktopOnly": true
+}

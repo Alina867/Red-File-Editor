@@ -1,0 +1,19 @@
+{
+  "name": "red-file-editor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sources modulaires du plugin Red File Editor pour Obsidian.",
+  "main": "main.js",
+  "scripts": {
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "npm run build && node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
