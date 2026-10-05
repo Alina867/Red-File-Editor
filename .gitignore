@@ -1,0 +1,4 @@
+node_modules/
+*.map
+# Réglages locaux du plugin : copie fournie mais ne pas les publier.
+data.json
