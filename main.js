@@ -1,4 +1,3 @@
-/* Fichier généré. Modifier src/ puis lancer npm run build. */
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   try {
@@ -449,16 +448,27 @@ var require_DevFileView = __commonJS({
       }
       getState() {
         return {
-          file: this.filePath
+          file: this.filePath,
+          autoEnvCompanion: this.autoEnvCompanion,
+          envSourcePath: this.envSourcePath
         };
       }
       async setState(state) {
-        this.filePath = state && typeof state.file === "string" ? state.file : "";
+        this.autoEnvCompanion = Boolean(state?.autoEnvCompanion);
+        this.envSourcePath = state?.envSourcePath || null;
+        if (this.autoEnvCompanion) {
+          this.navigation = false;
+        }
+        const newPath = state && typeof state.file === "string" ? state.file : "";
+        const pathChanged = newPath !== this.filePath;
+        this.filePath = newPath;
         this.file = this.filePath ? this.app.vault.getAbstractFileByPath(this.filePath) : null;
         if (!(this.file instanceof TFile2)) {
           this.file = null;
         }
-        await this.loadCurrentPath();
+        if (pathChanged) {
+          await this.loadCurrentPath();
+        }
       }
       async loadCurrentPath() {
         if (!this.filePath || !this.editor || this.loadingPath) {
@@ -497,6 +507,10 @@ var require_DevFileView = __commonJS({
         );
       }
       async saveNow() {
+        if (this.saveTimer) {
+          clearTimeout(this.saveTimer);
+          this.saveTimer = null;
+        }
         if (!this.filePath || !this.editor || this.loadingPath) {
           return;
         }
@@ -1317,9 +1331,14 @@ var require_dotfiles = __commonJS({
               ".nav-files-container"
             );
             if (rootContainer) {
+              const modRoot = rootContainer.querySelector(
+                ":scope > .nav-folder.mod-root > .nav-folder-children"
+              ) || rootContainer.querySelector(
+                ":scope > .tree-item.nav-folder > .tree-item-children"
+              );
               await this.syncHiddenFilesForFolder(
                 "",
-                rootContainer
+                modRoot || rootContainer
               );
             }
             const folderTitles = explorer.querySelectorAll(
@@ -1403,9 +1422,23 @@ var require_dotfiles = __commonJS({
           if (alreadyNative) {
             continue;
           }
+          const name = path.split("/").pop() || path;
+          const isEnv = name === ".env" || name.startsWith(".env.");
+          let targetYamlFile = null;
+          if (isEnv) {
+            const targetYamlTitle = Array.from(
+              container.querySelectorAll(
+                ".nav-file-title[data-path], .tree-item-self[data-path]"
+              )
+            ).find((el) => {
+              const p = el.getAttribute("data-path") || "";
+              return /\.(yaml|yml)$/i.test(p);
+            });
+            targetYamlFile = targetYamlTitle ? targetYamlTitle.closest(".nav-file") || targetYamlTitle.closest(".tree-item") : null;
+          }
           const alreadySynthetic = Array.from(
             container.querySelectorAll(
-              ":scope > .nav-file.dev-hidden-dotfile"
+              ":scope > .nav-file.dev-hidden-dotfile, .dev-hidden-dotfile"
             )
           ).find(
             (element) => element.getAttribute(
@@ -1413,9 +1446,14 @@ var require_dotfiles = __commonJS({
             ) === path
           );
           if (alreadySynthetic) {
+            if (isEnv && targetYamlFile && targetYamlFile.parentElement && alreadySynthetic.previousSibling !== targetYamlFile) {
+              targetYamlFile.parentElement.insertBefore(
+                alreadySynthetic,
+                targetYamlFile.nextSibling
+              );
+            }
             continue;
           }
-          const name = path.split("/").pop() || path;
           const nativeFile = Array.from(container.children).find(
             (child) => child.classList && child.classList.contains(
               "nav-file"
@@ -1550,7 +1588,12 @@ var require_dotfiles = __commonJS({
               "dev-hidden-dotfile"
             )
           );
-          if (firstNormalFile) {
+          if (isEnv && targetYamlFile && targetYamlFile.parentElement) {
+            targetYamlFile.parentElement.insertBefore(
+              fileEl,
+              targetYamlFile.nextSibling
+            );
+          } else if (firstNormalFile) {
             container.insertBefore(
               fileEl,
               firstNormalFile
@@ -1802,6 +1845,232 @@ var require_operations = __commonJS({
   }
 });
 
+// src/workspace/envCompanion.js
+var require_envCompanion = __commonJS({
+  "src/workspace/envCompanion.js"(exports2, module2) {
+    var { VIEW_TYPE_DEV_FILE: VIEW_TYPE_DEV_FILE2 } = require_constants();
+    var EnvCompanion2 = class {
+      constructor(plugin) {
+        this.plugin = plugin;
+        this.workspace = plugin.app.workspace;
+        this.leaf = null;
+        this.source = null;
+        this.currentSourcePath = null;
+        this.lastSourcePath = null;
+        this.manuallyClosed = /* @__PURE__ */ new Set();
+        this._programmaticClosing = false;
+        this.timer = null;
+        this.running = null;
+        this.dirty = false;
+        this.stopped = false;
+      }
+      leaves() {
+        const leaves = [];
+        this.workspace.iterateAllLeaves((leaf) => leaves.push(leaf));
+        return leaves;
+      }
+      isLeafAttached(leaf) {
+        if (!leaf) return false;
+        if (leaf.parent != null) return true;
+        return this.leaves().includes(leaf);
+      }
+      path(leaf) {
+        return leaf?.view?.file?.path || leaf?.view?.filePath || leaf?.getViewState()?.state?.file || "";
+      }
+      owns(leaf) {
+        if (!leaf) return false;
+        const type = leaf.getViewState()?.type || (typeof leaf.view?.getViewType === "function" ? leaf.view.getViewType() : null);
+        if (type && type !== VIEW_TYPE_DEV_FILE2 && type !== "empty") {
+          return false;
+        }
+        if (leaf.view && leaf.view.autoEnvCompanion === false) {
+          leaf._isEnvCompanion = false;
+          return false;
+        }
+        if (leaf._isEnvCompanion === true) return true;
+        if (leaf === this.leaf) return true;
+        if (leaf.view && (leaf.view.autoEnvCompanion === true || leaf.view._isEnvCompanion === true)) return true;
+        const state = leaf.getViewState();
+        return state?.type === VIEW_TYPE_DEV_FILE2 && state.state?.autoEnvCompanion === true;
+      }
+      target() {
+        const active = this.workspace.activeLeaf;
+        const source = active === this.leaf && this.owns(active) ? this.source : active;
+        if (!source || !this.isLeafAttached(source)) return null;
+        const path = this.path(source);
+        return /\.(yaml|yml|yam)$/i.test(path) ? { source, path } : null;
+      }
+      attachDetachInterceptor(leaf, sourcePath) {
+        if (!leaf || leaf._detachInterceptorAttached) return;
+        leaf._detachInterceptorAttached = true;
+        const originalDetach = leaf.detach;
+        leaf.detach = () => {
+          if (!this._programmaticClosing) {
+            const closingFor = sourcePath || this.currentSourcePath;
+            if (closingFor) {
+              this.manuallyClosed.add(closingFor);
+            }
+            if (this.leaf === leaf) {
+              this.leaf = null;
+            }
+          }
+          return originalDetach.call(leaf);
+        };
+      }
+      start() {
+        this.leaf = this.workspace.getLeavesOfType(VIEW_TYPE_DEV_FILE2).find((leaf) => this.owns(leaf)) || null;
+        if (this.leaf) {
+          this.leaf._isEnvCompanion = true;
+          const sourcePath = this.leaf.getViewState()?.state?.envSourcePath;
+          this.source = this.leaves().find((leaf) => leaf !== this.leaf && this.path(leaf) === sourcePath) || null;
+          this.currentSourcePath = sourcePath || null;
+          this.attachDetachInterceptor(this.leaf, sourcePath);
+        }
+        for (const name of ["active-leaf-change", "file-open", "layout-change"]) {
+          this.plugin.registerEvent(this.workspace.on(name, () => this.schedule()));
+        }
+        for (const name of ["create", "delete", "rename"]) {
+          this.plugin.registerEvent(this.plugin.app.vault.on(name, () => this.schedule()));
+        }
+        this.schedule();
+      }
+      schedule() {
+        if (this.stopped) return;
+        this.dirty = true;
+        if (this.running || this.timer) return;
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          void this.run();
+        }, 30);
+      }
+      async run() {
+        if (this.running) return this.running;
+        if (this.timer) {
+          clearTimeout(this.timer);
+          this.timer = null;
+        }
+        this.running = this.drain();
+        try {
+          await this.running;
+        } finally {
+          this.running = null;
+          if (this.dirty && !this.stopped) this.schedule();
+        }
+      }
+      async drain() {
+        while (this.dirty && !this.stopped) {
+          this.dirty = false;
+          try {
+            await this.sync();
+          } catch (error) {
+            console.error("[Red File Editor] Suivi du .env :", error);
+            await this.close();
+          }
+        }
+      }
+      sameTarget(expected) {
+        const current = this.target();
+        return !this.stopped && this.plugin.settings.autoOpenEnvWithYaml !== false && current?.source === expected.source && current.path === expected.path;
+      }
+      async sync() {
+        if (this.leaf && !this.isLeafAttached(this.leaf)) {
+          const envSourcePath = this.currentSourcePath || this.leaf._envSourcePath || this.leaf.getViewState()?.state?.envSourcePath || this.path(this.source);
+          if (envSourcePath) {
+            this.manuallyClosed.add(envSourcePath);
+          }
+          this.leaf = null;
+          this.currentSourcePath = null;
+        } else if (this.leaf && !this.owns(this.leaf)) {
+          this.leaf = null;
+          this.currentSourcePath = null;
+        }
+        const target = this.target();
+        if (this.lastSourcePath && target && this.lastSourcePath !== target.path) {
+          this.manuallyClosed.delete(this.lastSourcePath);
+        }
+        this.lastSourcePath = target?.path || null;
+        if (this.plugin.settings.autoOpenEnvWithYaml === false || !target) {
+          await this.close();
+          this.source = null;
+          this.currentSourcePath = null;
+          return;
+        }
+        if (this.manuallyClosed.has(target.path)) {
+          return;
+        }
+        this.source = target.source;
+        const slash = target.path.lastIndexOf("/");
+        const envPath = slash < 0 ? ".env" : `${target.path.slice(0, slash)}/.env`;
+        const stat = await this.plugin.app.vault.adapter.stat(envPath);
+        if (!this.sameTarget(target)) {
+          this.dirty = !this.stopped;
+          return;
+        }
+        if (!stat || stat.type !== "file") {
+          await this.close();
+          return;
+        }
+        let leaf = this.leaf;
+        if (!leaf || !this.isLeafAttached(leaf)) {
+          leaf = this.leaves().find((l) => this.owns(l)) || null;
+          if (!leaf) {
+            leaf = this.workspace.createLeafBySplit(target.source, "vertical", false);
+          }
+          this.leaf = leaf;
+        }
+        leaf._isEnvCompanion = true;
+        leaf._envSourcePath = target.path;
+        this.attachDetachInterceptor(leaf, target.path);
+        const state = leaf.getViewState().state || {};
+        if (!this.owns(leaf) || state.file !== envPath || state.envSourcePath !== target.path) {
+          if (this.owns(leaf) && state.file && state.file !== envPath && typeof leaf.view?.saveNow === "function") {
+            await leaf.view.saveNow();
+          }
+          await leaf.setViewState({
+            type: VIEW_TYPE_DEV_FILE2,
+            active: false,
+            pinned: true,
+            state: { file: envPath, autoEnvCompanion: true, envSourcePath: target.path }
+          });
+          leaf._isEnvCompanion = true;
+          leaf._envSourcePath = target.path;
+          if (leaf.view) {
+            leaf.view._isEnvCompanion = true;
+            leaf.view.autoEnvCompanion = true;
+            leaf.view.envSourcePath = target.path;
+          }
+        }
+        this.currentSourcePath = target.path;
+        if (typeof leaf.loadIfDeferred === "function") await leaf.loadIfDeferred();
+        if (!this.sameTarget(target)) this.dirty = !this.stopped;
+      }
+      async close() {
+        const leaf = this.leaf;
+        this.leaf = null;
+        this.currentSourcePath = null;
+        if (!leaf || !this.isLeafAttached(leaf) || !this.owns(leaf)) return;
+        if (typeof leaf.view?.saveNow === "function") await leaf.view.saveNow();
+        if (this.isLeafAttached(leaf) && this.owns(leaf)) {
+          this._programmaticClosing = true;
+          try {
+            leaf.detach();
+          } finally {
+            this._programmaticClosing = false;
+          }
+        }
+      }
+      stop() {
+        this.stopped = true;
+        this.dirty = false;
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = null;
+        void this.close().catch((error) => console.error("[Red File Editor] Fermeture du .env :", error));
+      }
+    };
+    module2.exports = { EnvCompanion: EnvCompanion2 };
+  }
+});
+
 // src/main.js
 var { Plugin, TFile, Notice } = require("obsidian");
 var { VIEW_TYPE_DEV_FILE, DEFAULT_EXTENSIONS } = require_constants();
@@ -1814,6 +2083,7 @@ var { openFileMethods } = require_openFiles();
 var { badgeMethods } = require_badges();
 var { dotfileMethods } = require_dotfiles();
 var { fileOperationMethods } = require_operations();
+var { EnvCompanion } = require_envCompanion();
 var DevFileEditorPlugin = class extends Plugin {
   async onload() {
     console.log("Loading Dev File Editor V2");
@@ -1847,69 +2117,82 @@ var DevFileEditorPlugin = class extends Plugin {
       (leaf) => new DevFileView(leaf)
     );
     this.registerSupportedExtensions();
+    this.envCompanion = new EnvCompanion(this);
     this.app.workspace.onLayoutReady(() => {
       this.installExistingFileClickInterceptor();
       this.installDotFileOpenHandler();
       this.installFileExplorerBadges();
       this.installHiddenDotFilesExplorer();
+      this.envCompanion.start();
     });
+    const handleNoteWithExplicitExtension = async (file) => {
+      if (!(file instanceof TFile)) {
+        return;
+      }
+      if (!file.name.toLowerCase().endsWith(".md")) {
+        this.scheduleExplorerBadgeUpdate();
+        return;
+      }
+      const rawBaseName = file.name.split("/").pop() || file.name;
+      const nameWithoutMd = rawBaseName.slice(0, -3);
+      if (!this.hasExplicitExtension(
+        nameWithoutMd
+      ) || nameWithoutMd.toLowerCase().endsWith(".md")) {
+        this.scheduleExplorerBadgeUpdate();
+        return;
+      }
+      const extension = this.getExtension(
+        nameWithoutMd
+      );
+      if (extension) {
+        await this.addExtension(
+          extension
+        );
+      }
+      const parentPath = file.parent && file.parent.path !== "/" && file.parent.path !== "" ? file.parent.path : "";
+      const newPath = parentPath ? `${parentPath}/${nameWithoutMd}` : nameWithoutMd;
+      const existing = this.app.vault.getAbstractFileByPath(
+        newPath
+      );
+      if (existing) {
+        new Notice(
+          `Le fichier existe d\xE9j\xE0 : ${newPath}`
+        );
+        return;
+      }
+      try {
+        if (this.app.fileManager && typeof this.app.fileManager.renameFile === "function") {
+          await this.app.fileManager.renameFile(
+            file,
+            newPath
+          );
+        }
+        const renamedFile = this.app.vault.getAbstractFileByPath(
+          newPath
+        );
+        if (renamedFile instanceof TFile) {
+          await this.openInDevEditor(
+            renamedFile
+          );
+        }
+        this.scheduleExplorerBadgeUpdate();
+      } catch (error) {
+        console.error(
+          "Dev File Editor:",
+          error
+        );
+      }
+    };
+    this.registerEvent(
+      this.app.vault.on(
+        "create",
+        handleNoteWithExplicitExtension
+      )
+    );
     this.registerEvent(
       this.app.vault.on(
         "rename",
-        async (file) => {
-          if (!(file instanceof TFile)) {
-            return;
-          }
-          if (!file.name.toLowerCase().endsWith(".md")) {
-            this.scheduleExplorerBadgeUpdate();
-            return;
-          }
-          const nameWithoutMd = file.name.slice(0, -3);
-          if (!this.hasExplicitExtension(
-            nameWithoutMd
-          )) {
-            this.scheduleExplorerBadgeUpdate();
-            return;
-          }
-          const extension = this.getExtension(
-            nameWithoutMd
-          );
-          if (extension) {
-            await this.addExtension(
-              extension
-            );
-          }
-          const newPath = file.parent && file.parent.path !== "/" ? `${file.parent.path}/${nameWithoutMd}` : nameWithoutMd;
-          const existing = this.app.vault.getAbstractFileByPath(
-            newPath
-          );
-          if (existing) {
-            new Notice(
-              `Le fichier existe d\xE9j\xE0 : ${newPath}`
-            );
-            return;
-          }
-          try {
-            await this.app.fileManager.renameFile(
-              file,
-              newPath
-            );
-            const renamedFile = this.app.vault.getAbstractFileByPath(
-              newPath
-            );
-            if (renamedFile instanceof TFile && isDotFile(renamedFile)) {
-              await this.openInDevEditor(
-                renamedFile
-              );
-            }
-            this.scheduleExplorerBadgeUpdate();
-          } catch (error) {
-            console.error(
-              "Dev File Editor:",
-              error
-            );
-          }
-        }
+        handleNoteWithExplicitExtension
       )
     );
     this.addCommand({
@@ -2059,6 +2342,9 @@ var DevFileEditorPlugin = class extends Plugin {
     document.documentElement.style.removeProperty(
       "--dev-file-editor-width"
     );
+    if (this.envCompanion) {
+      this.envCompanion.stop();
+    }
     console.log(
       "Unloading Dev File Editor V2"
     );

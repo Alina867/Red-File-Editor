@@ -79,9 +79,17 @@ const dotfileMethods = {
                     );
 
                 if (rootContainer) {
+                    const modRoot =
+                        rootContainer.querySelector(
+                            ":scope > .nav-folder.mod-root > .nav-folder-children"
+                        ) ||
+                        rootContainer.querySelector(
+                            ":scope > .tree-item.nav-folder > .tree-item-children"
+                        );
+
                     await this.syncHiddenFilesForFolder(
                         "",
-                        rootContainer
+                        modRoot || rootContainer
                     );
                 }
 
@@ -215,10 +223,33 @@ const dotfileMethods = {
                 continue;
             }
 
+            const name =
+                path.split("/").pop() || path;
+
+            const isEnv =
+                name === ".env" ||
+                name.startsWith(".env.");
+
+            let targetYamlFile = null;
+            if (isEnv) {
+                const targetYamlTitle = Array.from(
+                    container.querySelectorAll(
+                        ".nav-file-title[data-path], .tree-item-self[data-path]"
+                    )
+                ).find(el => {
+                    const p = el.getAttribute("data-path") || "";
+                    return /\.(yaml|yml)$/i.test(p);
+                });
+
+                targetYamlFile = targetYamlTitle
+                    ? (targetYamlTitle.closest(".nav-file") || targetYamlTitle.closest(".tree-item"))
+                    : null;
+            }
+
             const alreadySynthetic =
                 Array.from(
                     container.querySelectorAll(
-                        ":scope > .nav-file.dev-hidden-dotfile"
+                        ":scope > .nav-file.dev-hidden-dotfile, .dev-hidden-dotfile"
                     )
                 )
                 .find(
@@ -229,11 +260,19 @@ const dotfileMethods = {
                 );
 
             if (alreadySynthetic) {
+                if (
+                    isEnv &&
+                    targetYamlFile &&
+                    targetYamlFile.parentElement &&
+                    alreadySynthetic.previousSibling !== targetYamlFile
+                ) {
+                    targetYamlFile.parentElement.insertBefore(
+                        alreadySynthetic,
+                        targetYamlFile.nextSibling
+                    );
+                }
                 continue;
             }
-
-            const name =
-                path.split("/").pop() || path;
 
             /*
              * Reprendre la structure/classes d'un fichier natif du même
@@ -441,14 +480,21 @@ const dotfileMethods = {
                         )
                     );
 
-            if (firstNormalFile) {
+            if (
+                isEnv &&
+                targetYamlFile &&
+                targetYamlFile.parentElement
+            ) {
+                targetYamlFile.parentElement.insertBefore(
+                    fileEl,
+                    targetYamlFile.nextSibling
+                );
+            } else if (firstNormalFile) {
                 container.insertBefore(
                     fileEl,
                     firstNormalFile
                 );
-            }
-
-            else {
+            } else {
                 container.appendChild(
                     fileEl
                 );

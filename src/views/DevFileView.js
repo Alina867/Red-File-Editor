@@ -40,16 +40,28 @@ class DevFileView extends ItemView {
 
     getState() {
         return {
-            file: this.filePath
+            file: this.filePath,
+            autoEnvCompanion: this.autoEnvCompanion,
+            envSourcePath: this.envSourcePath
         };
     }
 
 
     async setState(state) {
-        this.filePath =
+        this.autoEnvCompanion = Boolean(state?.autoEnvCompanion);
+        this.envSourcePath = state?.envSourcePath || null;
+        if (this.autoEnvCompanion) {
+            this.navigation = false;
+        }
+
+        const newPath =
             state && typeof state.file === "string"
                 ? state.file
                 : "";
+
+        const pathChanged = newPath !== this.filePath;
+
+        this.filePath = newPath;
 
         this.file =
             this.filePath
@@ -60,7 +72,9 @@ class DevFileView extends ItemView {
             this.file = null;
         }
 
-        await this.loadCurrentPath();
+        if (pathChanged) {
+            await this.loadCurrentPath();
+        }
     }
 
 
@@ -120,6 +134,11 @@ class DevFileView extends ItemView {
 
 
     async saveNow() {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
+
         if (
             !this.filePath ||
             !this.editor ||
