@@ -432,6 +432,8 @@ var require_DevFileView = __commonJS({
         this.filenameEl = null;
         this.languageEl = null;
         this.statusEl = null;
+        this.saveStatusEl = null;
+        this.copyButtonEl = null;
         this.file = null;
         this.filePath = "";
         this.saveTimer = null;
@@ -496,6 +498,7 @@ var require_DevFileView = __commonJS({
         }
       }
       requestSave() {
+        this.setSaveStatus("saving");
         if (this.saveTimer) {
           clearTimeout(this.saveTimer);
         }
@@ -519,12 +522,14 @@ var require_DevFileView = __commonJS({
             this.filePath,
             this.editor.value
           );
+          this.setSaveStatus("saved");
         } catch (error) {
           console.error(
             "[Dev File Editor] Impossible d'\xE9crire",
             this.filePath,
             error
           );
+          this.setSaveStatus("error");
           new Notice2(
             `Impossible d'enregistrer : ${this.filePath}`
           );
@@ -548,12 +553,46 @@ var require_DevFileView = __commonJS({
         const header = this.contentEl.createDiv({
           cls: "dev-file-editor-header"
         });
-        this.filenameEl = header.createDiv({
+        const headerLeft = header.createDiv({
+          cls: "dev-file-editor-header-left"
+        });
+        this.filenameEl = headerLeft.createDiv({
           cls: "dev-file-editor-filename"
         });
-        this.languageEl = header.createDiv({
+        this.languageEl = headerLeft.createDiv({
           cls: "dev-file-editor-language"
         });
+        const headerActions = header.createDiv({
+          cls: "dev-file-editor-header-actions"
+        });
+        this.copyButtonEl = headerActions.createEl("button", {
+          cls: "dev-file-copy-btn",
+          text: "Copier"
+        });
+        this.copyButtonEl.setAttribute(
+          "title",
+          "Copier tout le contenu"
+        );
+        this.copyButtonEl.addEventListener(
+          "click",
+          async () => {
+            if (!this.editor) return;
+            try {
+              if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+                await navigator.clipboard.writeText(this.editor.value);
+              }
+              this.copyButtonEl.setText("Copi\xE9 !");
+              new Notice2("Contenu copi\xE9 dans le presse-papiers.");
+              setTimeout(() => {
+                if (this.copyButtonEl) {
+                  this.copyButtonEl.setText("Copier");
+                }
+              }, 1500);
+            } catch (e) {
+              new Notice2("Impossible de copier le contenu.");
+            }
+          }
+        );
         const body = this.contentEl.createDiv({
           cls: "dev-code-editor"
         });
@@ -592,6 +631,10 @@ var require_DevFileView = __commonJS({
         this.statusEl = footer.createDiv({
           cls: "dev-file-editor-status"
         });
+        this.saveStatusEl = footer.createDiv({
+          cls: "dev-file-editor-save-status"
+        });
+        this.setSaveStatus("saved");
         this.editor.addEventListener(
           "input",
           () => {
@@ -716,8 +759,15 @@ var require_DevFileView = __commonJS({
           `Ln ${line}, Col ${column}  \u2022  ${totalLines} ligne${totalLines > 1 ? "s" : ""}`
         );
       }
-      handleKeyDown(event) {
+      async handleKeyDown(event) {
         if (!this.editor) {
+          return;
+        }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          await this.saveNow();
+          const name = this.filePath.split("/").pop() || this.filePath;
+          new Notice2(`Enregistr\xE9 : ${name}`);
           return;
         }
         if (event.key === "Tab") {
@@ -827,6 +877,25 @@ ${indentation}`
           "select"
         );
       }
+      setSaveStatus(status) {
+        if (!this.saveStatusEl) {
+          return;
+        }
+        this.saveStatusEl.empty();
+        this.saveStatusEl.createSpan({
+          cls: `dev-save-dot mod-${status}`
+        });
+        const label = this.saveStatusEl.createSpan({
+          cls: "dev-save-label"
+        });
+        if (status === "saving") {
+          label.setText("Enregistrement...");
+        } else if (status === "saved") {
+          label.setText("Enregistr\xE9");
+        } else if (status === "error") {
+          label.setText("Erreur");
+        }
+      }
     };
     module2.exports = { DevFileView: DevFileView2 };
   }
@@ -837,9 +906,10 @@ var require_CreateFileModal = __commonJS({
   "src/modals/CreateFileModal.js"(exports2, module2) {
     var { Modal, Setting, Notice: Notice2 } = require("obsidian");
     var CreateFileModal2 = class extends Modal {
-      constructor(app, plugin) {
+      constructor(app, plugin, targetFolder = null) {
         super(app);
         this.plugin = plugin;
+        this.targetFolder = targetFolder;
         this.filename = "";
       }
       onOpen() {
@@ -850,6 +920,12 @@ var require_CreateFileModal = __commonJS({
         contentEl.createEl("p", {
           text: "Sans extension \u2192 .md | Avec extension \u2192 extension conserv\xE9e"
         });
+        if (this.targetFolder) {
+          contentEl.createEl("p", {
+            cls: "setting-item-description",
+            text: `Dossier cible : ${this.targetFolder}/`
+          });
+        }
         new Setting(contentEl).setName("Nom du fichier").setDesc("Exemples : Note serveur, .env, docker-compose.yml, nginx.conf").addText((text) => {
           text.setPlaceholder("docker-compose.yml").onChange((value) => {
             this.filename = value.trim();
@@ -880,7 +956,7 @@ var require_CreateFileModal = __commonJS({
           return;
         }
         this.close();
-        await this.plugin.createFile(this.filename);
+        await this.plugin.createFile(this.filename, this.targetFolder);
       }
       onClose() {
         this.contentEl.empty();
@@ -947,7 +1023,8 @@ var require_ChangeExtensionModal = __commonJS({
 // src/settings/DevFileEditorSettingTab.js
 var require_DevFileEditorSettingTab = __commonJS({
   "src/settings/DevFileEditorSettingTab.js"(exports2, module2) {
-    var { PluginSettingTab, Setting } = require("obsidian");
+    var { PluginSettingTab, Setting, Notice: Notice2 } = require("obsidian");
+    var { DEFAULT_EXTENSIONS: DEFAULT_EXTENSIONS2 } = require_constants();
     var DevFileEditorSettingTab2 = class extends PluginSettingTab {
       constructor(app, plugin) {
         super(app, plugin);
@@ -956,28 +1033,23 @@ var require_DevFileEditorSettingTab = __commonJS({
       display() {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl(
-          "h2",
-          {
-            text: "Red File Editor"
-          }
-        );
+        containerEl.createEl("h2", {
+          text: "Red File Editor"
+        });
+        containerEl.createEl("h3", {
+          text: "\xC9diteur de code"
+        });
         new Setting(containerEl).setName("Largeur de l'\xE9diteur").setDesc(
-          "R\xE8gle la largeur du bloc d'\xE9dition. La modification est appliqu\xE9e imm\xE9diatement."
+          "R\xE8gle la largeur du bloc d'\xE9dition (50% \xE0 100%). La modification est appliqu\xE9e imm\xE9diatement."
         ).addSlider((slider) => {
-          slider.setLimits(
-            50,
-            100,
-            1
-          ).setValue(
-            this.plugin.getEditorWidthPercent()
-          ).setDynamicTooltip().onChange(
-            async (value) => {
-              this.plugin.settings.editorWidthPercent = value;
-              this.plugin.applyEditorWidth();
-              await this.plugin.saveSettings();
+          slider.setLimits(50, 100, 1).setValue(this.plugin.getEditorWidthPercent()).setDynamicTooltip().onChange(async (value) => {
+            this.plugin.settings.editorWidthPercent = value;
+            this.plugin.applyEditorWidth();
+            await this.plugin.saveSettings();
+            if (widthInfo) {
+              widthInfo.setText(`Largeur actuelle : ${value} %`);
             }
-          );
+          });
         });
         const widthInfo = containerEl.createDiv({
           cls: "dev-file-editor-setting-info"
@@ -985,6 +1057,101 @@ var require_DevFileEditorSettingTab = __commonJS({
         widthInfo.setText(
           `Largeur actuelle : ${this.plugin.getEditorWidthPercent()} %`
         );
+        containerEl.createEl("h3", {
+          text: "Compagnon .env"
+        });
+        new Setting(containerEl).setName("Ouvrir automatiquement le .env avec les fichiers YAML").setDesc(
+          "Affiche automatiquement le fichier .env du m\xEAme dossier dans un panneau vertical \xE0 droite lors de l'ouverture d'un fichier .yaml ou .yml."
+        ).addToggle((toggle) => {
+          toggle.setValue(this.plugin.settings.autoOpenEnvWithYaml !== false).onChange(async (value) => {
+            this.plugin.settings.autoOpenEnvWithYaml = value;
+            await this.plugin.saveSettings();
+            if (this.plugin.envCompanion) {
+              this.plugin.envCompanion.schedule();
+            }
+          });
+        });
+        containerEl.createEl("h3", {
+          text: "Extensions de fichiers prises en charge"
+        });
+        const extensionsDesc = containerEl.createEl("p", {
+          cls: "setting-item-description"
+        });
+        extensionsDesc.setText(
+          "Les fichiers dotfiles (.env, .gitignore, etc.) sont toujours pris en charge. Les extensions ci-dessous sont \xE9dit\xE9es dans l'\xE9diteur de code sans ajouter le suffixe .md."
+        );
+        let newExtInput = "";
+        new Setting(containerEl).setName("Ajouter une extension").setDesc("Saisissez une extension sans point (ex: env.local, prisma, proto)").addText((text) => {
+          text.setPlaceholder("ex: prisma").onChange((val) => {
+            newExtInput = val.trim().toLowerCase().replace(/^\./, "");
+          });
+          text.inputEl.addEventListener("keydown", async (event) => {
+            if (event.key === "Enter" && newExtInput) {
+              event.preventDefault();
+              await this.addExtension(newExtInput);
+            }
+          });
+        }).addButton((btn) => {
+          btn.setButtonText("Ajouter").setCta().onClick(async () => {
+            if (newExtInput) {
+              await this.addExtension(newExtInput);
+            } else {
+              new Notice2("Veuillez saisir une extension valide.");
+            }
+          });
+        });
+        const badgesContainer = containerEl.createDiv({
+          cls: "dev-extensions-list-container"
+        });
+        const currentExtensions = Array.isArray(this.plugin.settings.extensions) ? this.plugin.settings.extensions : [...DEFAULT_EXTENSIONS2];
+        for (const ext of currentExtensions) {
+          const badge = badgesContainer.createDiv({
+            cls: "dev-extension-tag"
+          });
+          badge.createSpan({ text: `.${ext}` });
+          const removeBtn = badge.createSpan({
+            cls: "dev-extension-tag-remove",
+            text: "\xD7"
+          });
+          removeBtn.setAttribute("title", `Supprimer .${ext}`);
+          removeBtn.addEventListener("click", async () => {
+            this.plugin.settings.extensions = this.plugin.settings.extensions.filter(
+              (e) => e !== ext
+            );
+            await this.plugin.saveSettings();
+            this.display();
+            new Notice2(`Extension retir\xE9e : .${ext}`);
+          });
+        }
+        new Setting(containerEl).setName("R\xE9initialiser les extensions par d\xE9faut").setDesc("R\xE9tablit la liste d'origine des extensions support\xE9es.").addButton((btn) => {
+          btn.setButtonText("R\xE9initialiser").setWarning().onClick(async () => {
+            this.plugin.settings.extensions = [...DEFAULT_EXTENSIONS2];
+            await this.plugin.saveSettings();
+            if (typeof this.plugin.registerSupportedExtensions === "function") {
+              this.plugin.registerSupportedExtensions();
+            }
+            this.display();
+            new Notice2("Extensions r\xE9initialis\xE9es aux valeurs par d\xE9faut.");
+          });
+        });
+      }
+      async addExtension(ext) {
+        if (!ext || ext === "md") {
+          new Notice2("Extension invalide ou non support\xE9e.");
+          return;
+        }
+        if (this.plugin.settings.extensions.includes(ext)) {
+          new Notice2(`L'extension .${ext} est d\xE9j\xE0 enregistr\xE9e.`);
+          return;
+        }
+        if (typeof this.plugin.addExtension === "function") {
+          await this.plugin.addExtension(ext);
+        } else {
+          this.plugin.settings.extensions.push(ext);
+          await this.plugin.saveSettings();
+        }
+        this.display();
+        new Notice2(`Extension ajout\xE9e : .${ext}`);
       }
     };
     module2.exports = { DevFileEditorSettingTab: DevFileEditorSettingTab2 };
@@ -1661,7 +1828,7 @@ var require_operations = __commonJS({
           );
         }
       },
-      async createFile(filename) {
+      async createFile(filename, targetFolder = null) {
         filename = filename.trim();
         if (!filename) {
           return;
@@ -1671,10 +1838,12 @@ var require_operations = __commonJS({
         )) {
           filename += ".md";
         }
-        let folder = "";
-        const activeFile = this.app.workspace.getActiveFile();
-        if (activeFile && activeFile.parent && activeFile.parent.path !== "/") {
-          folder = activeFile.parent.path;
+        let folder = targetFolder || "";
+        if (!folder) {
+          const activeFile = this.app.workspace.getActiveFile();
+          if (activeFile && activeFile.parent && activeFile.parent.path !== "/") {
+            folder = activeFile.parent.path;
+          }
         }
         const path = folder ? `${folder}/${filename}` : filename;
         const existing = this.app.vault.getAbstractFileByPath(
@@ -1699,14 +1868,19 @@ var require_operations = __commonJS({
             path,
             ""
           );
-          if (isDotFile2(file)) {
+          const extension2 = this.getExtension(
+            file.name
+          );
+          const handledByPlugin = isDotFile2(file) || extension2 && extension2 !== "md" && this.settings.extensions.includes(extension2);
+          if (handledByPlugin) {
             await this.openInDevEditor(
               file
             );
           } else {
-            await this.app.workspace.getLeaf(false).openFile(
-              file
-            );
+            const leaf = typeof this.app.workspace.getLeaf === "function" ? this.app.workspace.getLeaf(false) : null;
+            if (leaf && typeof leaf.openFile === "function") {
+              await leaf.openFile(file);
+            }
           }
           this.scheduleExplorerBadgeUpdate();
           new Notice2(
@@ -2072,7 +2246,7 @@ var require_envCompanion = __commonJS({
 });
 
 // src/main.js
-var { Plugin, TFile, Notice } = require("obsidian");
+var { Plugin, TFile, TFolder, Notice } = require("obsidian");
 var { VIEW_TYPE_DEV_FILE, DEFAULT_EXTENSIONS } = require_constants();
 var { DevFileView } = require_DevFileView();
 var { CreateFileModal } = require_CreateFileModal();
@@ -2237,6 +2411,18 @@ var DevFileEditorPlugin = class extends Plugin {
       this.app.workspace.on(
         "file-menu",
         (menu, file) => {
+          if (typeof TFolder !== "undefined" && file instanceof TFolder || file && file.children !== void 0) {
+            menu.addItem((item) => {
+              item.setTitle("Cr\xE9er un fichier ici (Red File Editor)").setIcon("file-plus").onClick(() => {
+                new CreateFileModal(
+                  this.app,
+                  this,
+                  file.path
+                ).open();
+              });
+            });
+            return;
+          }
           if (!(file instanceof TFile)) {
             return;
           }
@@ -2278,6 +2464,23 @@ var DevFileEditorPlugin = class extends Plugin {
                 ).open();
               }
             );
+          });
+        }
+      )
+    );
+    this.registerEvent(
+      this.app.workspace.on(
+        "folder-menu",
+        (menu, folder) => {
+          const folderPath = folder ? folder.path : "";
+          menu.addItem((item) => {
+            item.setTitle("Cr\xE9er un fichier ici (Red File Editor)").setIcon("file-plus").onClick(() => {
+              new CreateFileModal(
+                this.app,
+                this,
+                folderPath
+              ).open();
+            });
           });
         }
       )

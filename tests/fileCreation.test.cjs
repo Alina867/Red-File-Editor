@@ -94,4 +94,34 @@ for (const [label, PluginClass] of variants) {
         assert.equal(renamedTo, 'src/test.py');
         assert(f.plugin.settings.extensions.includes('py'));
     });
+
+    test(`${label} : createFile avec targetFolder crée le fichier dans ce dossier`, async t => {
+        const f = fixture(PluginClass);
+        t.after(f.cleanup);
+        await f.plugin.onload();
+
+        let createdPath = null;
+        f.app.vault.create = async (path, content) => {
+            createdPath = path;
+            const file = new TFile(path);
+            return file;
+        };
+        f.plugin.openInDevEditor = async () => {};
+
+        await f.plugin.createFile('docker-compose.yml', 'deploy/server');
+        assert.equal(createdPath, 'deploy/server/docker-compose.yml');
+    });
+
+    test(`${label} : addExtension ajoute et normalise une nouvelle extension`, async t => {
+        const f = fixture(PluginClass);
+        t.after(f.cleanup);
+        await f.plugin.onload();
+
+        await f.plugin.addExtension('.prisma');
+        assert(f.plugin.settings.extensions.includes('prisma'));
+
+        // Ignorer .md
+        await f.plugin.addExtension('md');
+        assert(!f.plugin.settings.extensions.includes('md'));
+    });
 }

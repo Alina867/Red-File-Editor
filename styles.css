@@ -266,3 +266,120 @@ textarea.dev-code-input::selection {
 .dev-hidden-dotfile:hover {
     opacity: 1;
 }
+
+/* Header Actions & Copy Button */
+.dev-file-editor-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.dev-file-editor-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.dev-file-copy-btn {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: var(--radius-s);
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    line-height: 1.2;
+}
+
+.dev-file-copy-btn:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+    border-color: var(--interactive-accent);
+}
+
+/* Status Bar & Save Status Indicator */
+.dev-file-editor-statusbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 12px;
+    background-color: var(--background-secondary);
+    border-top: 1px solid var(--background-modifier-border);
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.dev-file-editor-save-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.dev-save-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.dev-save-dot.mod-saved {
+    background-color: var(--color-green, #48c774);
+}
+
+.dev-save-dot.mod-saving {
+    background-color: var(--color-yellow, #ffdd57);
+    animation: dev-save-pulse 1s infinite alternate;
+}
+
+.dev-save-dot.mod-error {
+    background-color: var(--color-red, #f14668);
+}
+
+@keyframes dev-save-pulse {
+    from { opacity: 0.4; }
+    to { opacity: 1; }
+}
+
+/* Settings Tab : Extensions List */
+.dev-extensions-list-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 0 16px 0;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.dev-extension-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background-color: var(--background-secondary-alt);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 2px 8px;
+    font-size: 12px;
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+}
+
+.dev-extension-tag-remove {
+    cursor: pointer;
+    font-weight: bold;
+    color: var(--text-faint);
+    margin-left: 2px;
+    padding: 0 2px;
+    border-radius: 3px;
+    line-height: 1;
+}
+
+.dev-extension-tag-remove:hover {
+    color: var(--color-red, #f14668);
+    background-color: var(--background-modifier-hover);
+}
+

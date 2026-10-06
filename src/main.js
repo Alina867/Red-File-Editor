@@ -1,4 +1,4 @@
-const { Plugin, TFile, Notice } = require("obsidian");
+const { Plugin, TFile, TFolder, Notice } = require("obsidian");
 const { VIEW_TYPE_DEV_FILE, DEFAULT_EXTENSIONS } = require("./constants");
 const { DevFileView } = require("./views/DevFileView");
 const { CreateFileModal } = require("./modals/CreateFileModal");
@@ -261,6 +261,25 @@ class DevFileEditorPlugin extends Plugin {
             this.app.workspace.on(
                 "file-menu",
                 (menu, file) => {
+                    if (
+                        (typeof TFolder !== "undefined" && file instanceof TFolder) ||
+                        (file && file.children !== undefined)
+                    ) {
+                        menu.addItem(item => {
+                            item
+                                .setTitle("Créer un fichier ici (Red File Editor)")
+                                .setIcon("file-plus")
+                                .onClick(() => {
+                                    new CreateFileModal(
+                                        this.app,
+                                        this,
+                                        file.path
+                                    ).open();
+                                });
+                        });
+                        return;
+                    }
+
                     if (!(file instanceof TFile)) {
                         return;
                     }
@@ -320,6 +339,27 @@ class DevFileEditorPlugin extends Plugin {
                                     ).open();
                                 }
                             );
+                    });
+                }
+            )
+        );
+
+        this.registerEvent(
+            this.app.workspace.on(
+                "folder-menu",
+                (menu, folder) => {
+                    const folderPath = folder ? folder.path : "";
+                    menu.addItem(item => {
+                        item
+                            .setTitle("Créer un fichier ici (Red File Editor)")
+                            .setIcon("file-plus")
+                            .onClick(() => {
+                                new CreateFileModal(
+                                    this.app,
+                                    this,
+                                    folderPath
+                                ).open();
+                            });
                     });
                 }
             )
