@@ -8,8 +8,52 @@ const dotfileMethods = {
 
         const observer =
             new MutationObserver(
-                () => {
-                    this.scheduleHiddenDotFilesUpdate();
+                mutations => {
+                    if (this.hiddenFilesUpdateRunning) {
+                        return;
+                    }
+
+                    let relevant = false;
+                    for (const m of mutations) {
+                        if (
+                            m.target &&
+                            m.target.classList &&
+                            (
+                                m.target.classList.contains("dev-hidden-dotfile") ||
+                                m.target.classList.contains("dev-hidden-dotfile-title") ||
+                                m.target.classList.contains("dev-file-explorer-badge")
+                            )
+                        ) {
+                            continue;
+                        }
+
+                        const allNodes = Array.from(m.addedNodes || []).concat(Array.from(m.removedNodes || []));
+                        const hasSelfElements = allNodes.some(
+                            node =>
+                                node.nodeType === 1 &&
+                                (
+                                    node.classList.contains("dev-hidden-dotfile") ||
+                                    node.classList.contains("dev-file-explorer-badge")
+                                )
+                        );
+
+                        if (hasSelfElements) {
+                            continue;
+                        }
+
+                        if (
+                            m.target &&
+                            m.target.closest &&
+                            m.target.closest('.workspace-leaf-content[data-type="file-explorer"]')
+                        ) {
+                            relevant = true;
+                            break;
+                        }
+                    }
+
+                    if (relevant) {
+                        this.scheduleHiddenDotFilesUpdate();
+                    }
                 }
             );
 
@@ -43,6 +87,11 @@ const dotfileMethods = {
 
 
     scheduleHiddenDotFilesUpdate() {
+        if (this.hiddenFilesUpdateRunning) {
+            this.hiddenFilesNeedsRerun = true;
+            return;
+        }
+
         if (this.hiddenFilesUpdateTimer) {
             clearTimeout(
                 this.hiddenFilesUpdateTimer
@@ -148,6 +197,10 @@ const dotfileMethods = {
 
         finally {
             this.hiddenFilesUpdateRunning = false;
+            if (this.hiddenFilesNeedsRerun) {
+                this.hiddenFilesNeedsRerun = false;
+                this.scheduleHiddenDotFilesUpdate();
+            }
         }
     },
 
@@ -234,22 +287,27 @@ const dotfileMethods = {
             if (isEnv) {
                 const targetYamlTitle = Array.from(
                     container.querySelectorAll(
-                        ".nav-file-title[data-path], .tree-item-self[data-path]"
+                        ":scope > .nav-file > .nav-file-title[data-path], :scope > .tree-item > .tree-item-self[data-path]"
                     )
                 ).find(el => {
                     const p = el.getAttribute("data-path") || "";
-                    return /\.(yaml|yml)$/i.test(p);
+                    const fileFolder = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
+                    return fileFolder === folderPath && /\.(yaml|yml)$/i.test(p);
                 });
 
-                targetYamlFile = targetYamlTitle
+                const rawYamlFile = targetYamlTitle
                     ? (targetYamlTitle.closest(".nav-file") || targetYamlTitle.closest(".tree-item"))
+                    : null;
+
+                targetYamlFile = (rawYamlFile && rawYamlFile.parentElement === container)
+                    ? rawYamlFile
                     : null;
             }
 
             const alreadySynthetic =
                 Array.from(
                     container.querySelectorAll(
-                        ":scope > .nav-file.dev-hidden-dotfile, .dev-hidden-dotfile"
+                        ":scope > .nav-file.dev-hidden-dotfile"
                     )
                 )
                 .find(
@@ -263,10 +321,9 @@ const dotfileMethods = {
                 if (
                     isEnv &&
                     targetYamlFile &&
-                    targetYamlFile.parentElement &&
                     alreadySynthetic.previousSibling !== targetYamlFile
                 ) {
-                    targetYamlFile.parentElement.insertBefore(
+                    container.insertBefore(
                         alreadySynthetic,
                         targetYamlFile.nextSibling
                     );
@@ -482,14 +539,13 @@ const dotfileMethods = {
 
             if (
                 isEnv &&
-                targetYamlFile &&
-                targetYamlFile.parentElement
+                targetYamlFile
             ) {
-                targetYamlFile.parentElement.insertBefore(
+                container.insertBefore(
                     fileEl,
                     targetYamlFile.nextSibling
                 );
-            } else if (firstNormalFile) {
+            } else if (firstNormalFile && firstNormalFile.parentElement === container) {
                 container.insertBefore(
                     fileEl,
                     firstNormalFile

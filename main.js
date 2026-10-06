@@ -1338,8 +1338,30 @@ var require_badges = __commonJS({
       installFileExplorerBadges() {
         this.scheduleExplorerBadgeUpdate();
         const observer = new MutationObserver(
-          () => {
-            this.scheduleExplorerBadgeUpdate();
+          (mutations) => {
+            if (this.badgeUpdateRunning) {
+              return;
+            }
+            let relevant = false;
+            for (const m of mutations) {
+              if (m.target && m.target.classList && m.target.classList.contains("dev-file-explorer-badge")) {
+                continue;
+              }
+              const allNodes = Array.from(m.addedNodes || []).concat(Array.from(m.removedNodes || []));
+              const hasOnlyBadges = allNodes.length > 0 && allNodes.every(
+                (node) => node.nodeType === 1 && node.classList.contains("dev-file-explorer-badge")
+              );
+              if (hasOnlyBadges) {
+                continue;
+              }
+              if (m.target && m.target.closest && m.target.closest('.workspace-leaf-content[data-type="file-explorer"]')) {
+                relevant = true;
+                break;
+              }
+            }
+            if (relevant) {
+              this.scheduleExplorerBadgeUpdate();
+            }
           }
         );
         observer.observe(
@@ -1385,49 +1407,57 @@ var require_badges = __commonJS({
         );
       },
       updateFileExplorerBadges() {
-        const titles = document.querySelectorAll(
-          ".nav-file-title"
-        );
-        titles.forEach(
-          (title) => {
-            const oldBadge = title.querySelector(
-              ".dev-file-explorer-badge"
-            );
-            const path = title.getAttribute(
-              "data-path"
-            );
-            if (!path) {
-              return;
-            }
-            const file = this.app.vault.getAbstractFileByPath(
-              path
-            );
-            if (!(file instanceof TFile2)) {
-              return;
-            }
-            if (!isDotFile2(file)) {
-              return;
-            }
-            const label = getTypeLabelFromFile(file);
-            if (!label) {
-              return;
-            }
-            if (oldBadge) {
-              if (oldBadge.textContent !== label) {
-                oldBadge.textContent = label;
+        if (this.badgeUpdateRunning) {
+          return;
+        }
+        this.badgeUpdateRunning = true;
+        try {
+          const titles = document.querySelectorAll(
+            ".nav-file-title"
+          );
+          titles.forEach(
+            (title) => {
+              const oldBadge = title.querySelector(
+                ".dev-file-explorer-badge"
+              );
+              const path = title.getAttribute(
+                "data-path"
+              );
+              if (!path) {
+                return;
               }
-              return;
+              const file = this.app.vault.getAbstractFileByPath(
+                path
+              );
+              if (!(file instanceof TFile2)) {
+                return;
+              }
+              if (!isDotFile2(file)) {
+                return;
+              }
+              const label = getTypeLabelFromFile(file);
+              if (!label) {
+                return;
+              }
+              if (oldBadge) {
+                if (oldBadge.textContent !== label) {
+                  oldBadge.textContent = label;
+                }
+                return;
+              }
+              const badge = document.createElement(
+                "span"
+              );
+              badge.className = "dev-file-explorer-badge";
+              badge.textContent = label;
+              title.appendChild(
+                badge
+              );
             }
-            const badge = document.createElement(
-              "span"
-            );
-            badge.className = "dev-file-explorer-badge";
-            badge.textContent = label;
-            title.appendChild(
-              badge
-            );
-          }
-        );
+          );
+        } finally {
+          this.badgeUpdateRunning = false;
+        }
       }
     };
     module2.exports = { badgeMethods: badgeMethods2 };
@@ -1442,8 +1472,30 @@ var require_dotfiles = __commonJS({
       installHiddenDotFilesExplorer() {
         this.scheduleHiddenDotFilesUpdate();
         const observer = new MutationObserver(
-          () => {
-            this.scheduleHiddenDotFilesUpdate();
+          (mutations) => {
+            if (this.hiddenFilesUpdateRunning) {
+              return;
+            }
+            let relevant = false;
+            for (const m of mutations) {
+              if (m.target && m.target.classList && (m.target.classList.contains("dev-hidden-dotfile") || m.target.classList.contains("dev-hidden-dotfile-title") || m.target.classList.contains("dev-file-explorer-badge"))) {
+                continue;
+              }
+              const allNodes = Array.from(m.addedNodes || []).concat(Array.from(m.removedNodes || []));
+              const hasSelfElements = allNodes.some(
+                (node) => node.nodeType === 1 && (node.classList.contains("dev-hidden-dotfile") || node.classList.contains("dev-file-explorer-badge"))
+              );
+              if (hasSelfElements) {
+                continue;
+              }
+              if (m.target && m.target.closest && m.target.closest('.workspace-leaf-content[data-type="file-explorer"]')) {
+                relevant = true;
+                break;
+              }
+            }
+            if (relevant) {
+              this.scheduleHiddenDotFilesUpdate();
+            }
           }
         );
         observer.observe(
@@ -1472,6 +1524,10 @@ var require_dotfiles = __commonJS({
         }
       },
       scheduleHiddenDotFilesUpdate() {
+        if (this.hiddenFilesUpdateRunning) {
+          this.hiddenFilesNeedsRerun = true;
+          return;
+        }
         if (this.hiddenFilesUpdateTimer) {
           clearTimeout(
             this.hiddenFilesUpdateTimer
@@ -1545,6 +1601,10 @@ var require_dotfiles = __commonJS({
           );
         } finally {
           this.hiddenFilesUpdateRunning = false;
+          if (this.hiddenFilesNeedsRerun) {
+            this.hiddenFilesNeedsRerun = false;
+            this.scheduleHiddenDotFilesUpdate();
+          }
         }
       },
       async syncHiddenFilesForFolder(folderPath, container) {
@@ -1595,17 +1655,19 @@ var require_dotfiles = __commonJS({
           if (isEnv) {
             const targetYamlTitle = Array.from(
               container.querySelectorAll(
-                ".nav-file-title[data-path], .tree-item-self[data-path]"
+                ":scope > .nav-file > .nav-file-title[data-path], :scope > .tree-item > .tree-item-self[data-path]"
               )
             ).find((el) => {
               const p = el.getAttribute("data-path") || "";
-              return /\.(yaml|yml)$/i.test(p);
+              const fileFolder = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
+              return fileFolder === folderPath && /\.(yaml|yml)$/i.test(p);
             });
-            targetYamlFile = targetYamlTitle ? targetYamlTitle.closest(".nav-file") || targetYamlTitle.closest(".tree-item") : null;
+            const rawYamlFile = targetYamlTitle ? targetYamlTitle.closest(".nav-file") || targetYamlTitle.closest(".tree-item") : null;
+            targetYamlFile = rawYamlFile && rawYamlFile.parentElement === container ? rawYamlFile : null;
           }
           const alreadySynthetic = Array.from(
             container.querySelectorAll(
-              ":scope > .nav-file.dev-hidden-dotfile, .dev-hidden-dotfile"
+              ":scope > .nav-file.dev-hidden-dotfile"
             )
           ).find(
             (element) => element.getAttribute(
@@ -1613,8 +1675,8 @@ var require_dotfiles = __commonJS({
             ) === path
           );
           if (alreadySynthetic) {
-            if (isEnv && targetYamlFile && targetYamlFile.parentElement && alreadySynthetic.previousSibling !== targetYamlFile) {
-              targetYamlFile.parentElement.insertBefore(
+            if (isEnv && targetYamlFile && alreadySynthetic.previousSibling !== targetYamlFile) {
+              container.insertBefore(
                 alreadySynthetic,
                 targetYamlFile.nextSibling
               );
@@ -1755,12 +1817,12 @@ var require_dotfiles = __commonJS({
               "dev-hidden-dotfile"
             )
           );
-          if (isEnv && targetYamlFile && targetYamlFile.parentElement) {
-            targetYamlFile.parentElement.insertBefore(
+          if (isEnv && targetYamlFile) {
+            container.insertBefore(
               fileEl,
               targetYamlFile.nextSibling
             );
-          } else if (firstNormalFile) {
+          } else if (firstNormalFile && firstNormalFile.parentElement === container) {
             container.insertBefore(
               fileEl,
               firstNormalFile
